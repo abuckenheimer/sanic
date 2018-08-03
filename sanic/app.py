@@ -597,6 +597,8 @@ class Sanic:
                 response = handler(request, *args, **kwargs)
                 if isawaitable(response):
                     response = await response
+        except CancelledError as e:
+            return
         except Exception as e:
             # -------------------------------------------- #
             # Response Generation Failed
