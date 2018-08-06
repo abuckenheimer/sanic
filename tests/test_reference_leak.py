@@ -29,48 +29,46 @@ async def fast_handler(request):
 app.config.RESPONSE_TIMEOUT = 1
 
 
-# this works
-def test_completed_request_cleaned_up():
+def test_cli(method, url, **kwargs):
     results = [None, None]
 
     @app.listener('after_server_start')
     async def _collect_response(sanic, loop):
-        results[0] = await app.test_client._local_request('get', '/fast')
+        print(loop)
+        results[0] = await app.test_client._local_request(method, url)
         # at this point the request is done leaked should no longer have a
         # weakref to LeakedObject
+        await asyncio.sleep(1)  # just making sure theres no pending cleanup tasks
         results[1] = list(leaked)
         app.stop()
 
-    app.run(host='127.0.0.1', debug=True, port=app.test_client.port)
-    resp, references_leaked = results
+    app.run(
+        host='127.0.0.1',
+        port=app.test_client.port,
+        auto_reload=False,
+        **kwargs
+    )
+    app.listeners['after_server_start'].pop()
+    return results
+
+
+# this works
+def test_completed_request_cleaned_up(**kwargs):
+    resp, references_leaked = test_cli('get', '/fast', **kwargs)
     assert resp.status == 200
     assert resp.body == b'OK'
     assert references_leaked == []
-    app.listeners['after_server_start'].pop()
 
 
 # this does not
-def test_timed_out_request_cleaned_up():
-    results = [None, None]
-
-    @app.listener('after_server_start')
-    async def _collect_response(sanic, loop):
-        results[0] = await app.test_client._local_request('get', '/slow')
-        # at this point the request is done leaked should no longer have a
-        # weakref to LeakedObject
-        await asyncio.sleep(1)
-        results[1] = list(leaked)
-        app.stop()
-
-    app.run(host='127.0.0.1', debug=True, port=app.test_client.port)
-    resp, references_leaked = results
+def test_timed_out_request_cleaned_up(**kwargs):
+    resp, references_leaked = test_cli('get', '/slow', **kwargs)
     assert resp.status == 503
     assert resp.body == b'Error: Response Timeout'
     assert references_leaked == []  # <<< fails here
-    app.listeners['after_server_start'].pop()
 
 
 if __name__ == '__main__':
-    test_completed_request_cleaned_up()
+    # test_completed_request_cleaned_up()
     test_timed_out_request_cleaned_up()
-    # app.run('0.0.0.0', port=8001)
+    test_timed_out_request_cleaned_up(debug=True)
